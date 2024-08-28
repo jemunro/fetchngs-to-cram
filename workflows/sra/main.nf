@@ -12,6 +12,10 @@ include { ASPERA_CLI              } from '../../modules/local/aspera_cli'
 include { SRA_TO_SAMPLESHEET      } from '../../modules/local/sra_to_samplesheet'
 include { softwareVersionsToYAML  } from '../../subworkflows/nf-core/utils_nfcore_pipeline'
 
+// JEM added CRAM conversion
+include { FASTP_PE; FASTP_SE      } from '../../modules/local/to_cram/fastp'
+include { ALIGN_PE; ALIGN_SE      } from '../../modules/local/to_cram/align'
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     IMPORT NF-CORE SUBWORKFLOWS
@@ -33,6 +37,17 @@ workflow SRA {
 
     main:
     ch_versions = Channel.empty()
+
+   
+    // JEM - skip samples which already have a CRAM file 
+    ids_count = ids.count()
+    ids_complete = file("${params.outdir}/cram/*.cram")
+        .collect { it.name.findAll(/[A-Z]{3,6}[0-9]{5,20}/)  }
+        .flatten()
+        .unique()
+    ids = ids.filter { !(it in ids_complete) }
+    ids_flt_count = ids.count()
+    ids_count.concat(ids_flt_count).toList().view { "Skipping ${it[0] - it[1]} of ${it[0]} samples."}
 
     //
     // MODULE: Get SRA run information for public database ids
@@ -132,6 +147,40 @@ workflow SRA {
                     return meta_clone
             }
             .set { ch_sra_metadata }
+
+        // preprocess and convert to cram
+        to_align = SRA_FASTQ_FTP
+            .out
+            .fastq
+            .mix(FASTQ_DOWNLOAD_PREFETCH_FASTERQDUMP_SRATOOLS.out.reads)
+            .mix(ASPERA_CLI.out.fastq)
+            .branch { meta, fastq ->
+                single: meta.single_end
+                    return [meta.id, fastq[0]]
+                paired: true
+                    return [meta.id, fastq[0], fastq[1]]
+            }
+        
+        // JEM added CRAM conversion
+        FASTP_SE(to_align.single)
+        ALIGN_SE(
+            FASTP_SE.out,
+            file(params.ref_fasta), 
+            file(params.ref_fasta + '.*')
+        )
+
+        FASTP_PE(to_align.paired)
+        ALIGN_PE(
+            FASTP_PE.out,
+            file(params.ref_fasta),
+            file(params.ref_fasta + '.*')
+        )
+
+        // CRAM(
+        //     ALIGN_PE.out.mix(ALIGN_SE.out),
+        //     file(params.ref_fasta), 
+        //     file(params.ref_fasta + '.*')
+        // )
     }
 
     //
