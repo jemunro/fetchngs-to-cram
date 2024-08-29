@@ -37,7 +37,7 @@ process ALIGN_PE {
 process ALIGN_SE {
     cpus 4
     memory '4 GB'
-    time '2 h'
+    time '4 h'
     label 'align'
     tag { "$sm" }
     publishDir "${params.outdir}/cram", mode: 'copy'
@@ -51,6 +51,8 @@ process ALIGN_SE {
         tuple val(sm), path(cram), path(crai)
 
     script:
+    cram = sm + '.cram'
+    crai = cram + '.crai'
     """
     bwa mem -M -t ${task.cpus} -R '@RG\\tID:${sm}\\tSM:${sm}' $ref $fq |
         samtools view -b > unsorted.bam
@@ -61,6 +63,6 @@ process ALIGN_SE {
         -O CRAM,level=8 \\
         --output $cram##idx##$crai \\
         --write-index
-    rm unsorted.bam fixmate.bam markdup.bam
+    rm unsorted.bam markdup.bam
     """
 }
